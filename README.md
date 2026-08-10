@@ -29,7 +29,9 @@ plugin for it to keep working.
   `plugin.py` adds its own folder to `sys.path` and imports its sibling
   `settings_page.py` by bare module name (same convention as
   `cache/plugins/maya_launcher/plugin.py`) instead of a `plugins.repo_internal...`
-  dotted import. It also contributes PYTHONPATH entries to
+  dotted import. It also contributes PYTHONPATH (`maya-scripts/`) **and**
+  MAYA_PLUG_IN_PATH (`maya-plug-ins/`, added 2026-08-10 — see "MayaToolkit
+  menu integration" below) entries to
   `cache/plugins/maya_launcher/`'s shared `maya_launcher_env_bridge`
   `PluginConfigStore` (same convention as
   `cache/plugins/MayaToolkit/plugin.py`) — no file opener, since this
@@ -39,6 +41,13 @@ plugin for it to keep working.
   `CATEGORY_REPO` Settings tab (`settings_page.py`, see below) — a
   UkoreHub-side page, not Maya-side, unlike everything else `plugin.py`
   does.
+- `maya-plug-ins/mayaFileBrowser.py` — a compiled/script Maya plug-in
+  (force-loaded the same way as MayaToolkit's own `ukoreMaya.py`, see
+  "MayaToolkit menu integration" below) whose sole job is inserting the
+  "Maya File Browser..." menu item — this plugin's only current launch
+  path inside Maya (there is no auto-launch hook and no other menu item
+  calling `File.launch("UkoreBrowser")` anywhere in this codebase as of
+  2026-08-10, unlike what an earlier version of this README implied).
 - `settings_page.py` — `MayaFileBrowserSettingsPage`: the "Repo Studio
   Setting" tab (Repository Setting popup > Maya File Browser) — unlike
   MayaPublisher's per-ticket "which pipeline connection does this ticket
@@ -119,6 +128,45 @@ breaks.** Don't "fix" this by vendoring `tmlib`/`UkoreMaya`/`PublishApi`'s
 logic in here without a deliberate decision to do so; see
 `cache/plugins/maya_launcher/README.md` for the general shape of the
 bridge convention every Maya tool plugin here relies on.
+
+## MayaToolkit menu integration (no edit to MayaToolkit)
+
+Added 2026-08-10, together with the `MAYA_PLUG_IN_PATH` contribution
+above. `maya-plug-ins/mayaFileBrowser.py` is a small standalone Maya
+plug-in — force-loaded by `maya_launcher` the same way MayaToolkit's own
+`maya-plug-ins/ukoreMaya.py` is — whose `initializePlugin` inserts a
+single "Maya File Browser..." item at the very top of MayaToolkit's
+"Ukore Studio Tool" menu (`cmds.menuItem(insertAfter="", ...)`, Maya's
+documented way to place an item ahead of everything else already in a
+menu), then launches via the same `tmlib.core.File.launch("UkoreBrowser")`
+every other tool's menu item uses.
+
+This is deliberately **not** a code change to
+`cache/plugins/MayaToolkit/maya-plug-ins/ukoreMaya.py` — that file's
+`loadMenu()` is a single hardcoded, imperative build (literal
+`cmds.menuItem(...)` calls in a fixed sequence); it has no plugin-facing
+registration point equivalent to UkoreHub's own `PluginAPI` on the
+Python/desktop side. Bolting another tool's menu item onto an existing
+menu from a *separate* plug-in, using only the menu's own name/parent/label
+as a convention (`MENU_MAIN`/`MENU_LABEL`/`MENU_PARENT` — matched to
+`ukoreMaya.py`'s own constants of the same names, no import), sidesteps
+editing MayaToolkit at all — same "convention, not coupling" philosophy as
+the `maya_launcher_env_bridge` id convention elsewhere in this codebase.
+
+Ordering this menu item after MayaToolkit's own menu-build (so there's a
+menu to insert into) relies on `maya_launcher`'s force-load step iterating
+contributed tool ids **alphabetically** — `"maya_toolkit" < "ukore_browser"`
+— so MayaToolkit's `ukoreMaya.py` plug-in loads (and queues its
+`evalDeferred(loadMenu)`) first, ahead of this plugin's. `_add_menu_item()`
+still defensively creates the menu itself if it's missing (e.g. MayaToolkit
+disabled for this repo while this plugin stays enabled), so this doesn't
+hard-depend on that ordering actually holding.
+
+If MayaToolkit's own menu name/parent/label (the `MENU_MAIN`/`MENU_LABEL`/
+`MENU_PARENT` constants in `ukoreMaya.py`) ever changes, update the
+matching constants in `mayaFileBrowser.py` to match — that's the one
+coupling point this integration has, and it's a plain string match, not an
+import.
 
 ## Root-path detection
 
