@@ -11,10 +11,10 @@ def _ref_key(ref: dict) -> str:
     return "{}:{}:{}".format(ref.get("project_id"), ref.get("repo_id"), ref.get("custom_path_id"))
 
 
-class UkoreBrowserSettingsPage(QWidget):
-    """Repo Studio Setting for UkoreBrowser — unlike MayaPublisher's
+class MayaFileBrowserSettingsPage(QWidget):
+    """Repo Studio Setting for MayaFileBrowser (formerly UkoreBrowser) — unlike MayaPublisher's
     per-ticket "which pipeline connection does this ticket publish into"
-    picker (chosen entirely in Maya via Manage Tickets...), UkoreBrowser
+    picker (chosen entirely in Maya via Manage Tickets...), MayaFileBrowser
     genuinely shows several root tabs at once (its whole point is
     browsing multiple pipeline-connected repos side by side), so this is
     a **multi-select** checkbox list instead — one row per active-repo
@@ -27,9 +27,12 @@ class UkoreBrowserSettingsPage(QWidget):
     Stores the HIDDEN set (opt-out): a brand-new pipeline ref (or a
     brand-new tool version state entirely) should default to shown/
     enabled rather than requiring someone to notice and re-check it.
-    Persists into this plugin's own PluginConfigStore
-    (data/plugins/core/ukore_browser.json, key "repo_hidden_root_tabs"),
-    read back on the Maya side by
+    Persists into this repo's own Repo.plugin_data[TOOL_ID]
+    ("ukore_browser", the technical id kept for backward compatibility —
+    see plugin.py) under key "repo_hidden_root_tabs", via
+    api.metadata.get_repo_plugin_data/set_repo_plugin_data — moved off the
+    old standalone data/plugins/core/ukore_browser.json PluginConfigStore
+    blob by migrate_legacy_data() below. Read back on the Maya side by
     maya-scripts/UkoreBrowser/core/repo_context.py's
     get_pipeline_root_tabs(). Same self-resolving-active-repo `refresh()`
     pattern as interface/settings/browser_links_settings_page.py."""
@@ -75,12 +78,12 @@ class UkoreBrowserSettingsPage(QWidget):
         if not self._refs:
             self.hint_label.setText(
                 "This repo has no pipeline connections declared in Project Editor yet — "
-                "UkoreBrowser has nothing to show extra root tabs for."
+                "Maya File Browser has nothing to show extra root tabs for."
             )
             return
 
         self.hint_label.setText(
-            "Uncheck a connection to hide it from UkoreBrowser's root-tab row without removing "
+            "Uncheck a connection to hide it from Maya File Browser's root-tab row without removing "
             "the pipeline connection itself."
         )
         hidden = set(self._get_hidden())

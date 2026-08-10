@@ -1,36 +1,52 @@
-# plugins/repo_internal/UkoreBrowser/
+# cache/plugins/MayaFileBrowser/
 
 Maya-side asset browser — a standalone tool launched from inside Maya (not a
 UkoreHub UI panel). Extracted out of `add-on/MayaToolkit` on 2026-07-13;
 folded into `plugins/repo_internal/maya_launcher/UkoreBrowser/` as one of 7 nested
-tools during the 2026-07-14 consolidation; split back out to this top-level
-plugin on 2026-07-19 (see `plugins/repo_internal/maya_launcher/README.md` for why).
-Still depends on MayaToolkit's `tmlib`/`UkoreMaya` packages **and** on
-`plugins/repo_internal/PublishApi` staying on PYTHONPATH (see "External
-dependencies" below), so both must stay enabled alongside this plugin for
-it to keep working.
+tools during the 2026-07-14 consolidation; split back out to its own
+top-level plugin on 2026-07-19 (see `cache/plugins/maya_launcher/README.md`
+for why); moved out to its own standalone git clone under `cache/plugins/`
+once every `repo_internal` plugin made that same move (see
+`UkoreHubDev`'s `plugins/README.md`). **Renamed from `UkoreBrowser` to
+`MayaFileBrowser` on 2026-08-10** to avoid confusion with other
+similarly-named, unrelated things (see `UkoreHubDev`'s
+`developer/app/GLOSSARY.md`, "'UkoreBrowser' vs. 'Browser Links'") — the
+folder, manifest `name`, and settings-tab label all changed, but the
+manifest/technical `id` stays `"ukore_browser"` (see `plugin.py`) to avoid
+silently un-enabling this plugin for every repo that already opted in, and
+the Maya-side package name under `maya-scripts/UkoreBrowser/` stays
+`UkoreBrowser` too — see "Maya-scripts package name" below for why that one
+can't be renamed at all. Still depends on MayaToolkit's `tmlib`/`UkoreMaya`
+packages **and** on `cache/plugins/PublishApi` staying on PYTHONPATH (see
+"External dependencies" below), so both must stay enabled alongside this
+plugin for it to keep working.
 
 ## Shape
 
 - `manifest.json` / `plugin.py` — standard plugin registration (see
-  `plugins/README.md`). `plugin.py` contributes PYTHONPATH entries to
-  `plugins/repo_internal/maya_launcher/`'s shared `maya_launcher_env_bridge`
+  `plugins/README.md`). Since this plugin lives in its own standalone git
+  clone rather than inside UkoreHub's own `plugins` package tree,
+  `plugin.py` adds its own folder to `sys.path` and imports its sibling
+  `settings_page.py` by bare module name (same convention as
+  `cache/plugins/maya_launcher/plugin.py`) instead of a `plugins.repo_internal...`
+  dotted import. It also contributes PYTHONPATH entries to
+  `cache/plugins/maya_launcher/`'s shared `maya_launcher_env_bridge`
   `PluginConfigStore` (same convention as
-  `plugins/repo_internal/MayaToolkit/plugin.py`) — no file opener, since this
+  `cache/plugins/MayaToolkit/plugin.py`) — no file opener, since this
   tool is launched explicitly from a Maya menu, not triggered by opening a
   file. No direct import relationship with `maya_launcher` — just the
   shared `PluginConfigStore` id convention. **Also** registers a
   `CATEGORY_REPO` Settings tab (`settings_page.py`, see below) — a
   UkoreHub-side page, not Maya-side, unlike everything else `plugin.py`
   does.
-- `settings_page.py` — `UkoreBrowserSettingsPage`: the "Repo Studio
-  Setting" tab (Repository Setting popup > Ukore Browser) — unlike
+- `settings_page.py` — `MayaFileBrowserSettingsPage`: the "Repo Studio
+  Setting" tab (Repository Setting popup > Maya File Browser) — unlike
   MayaPublisher's per-ticket "which pipeline connection does this ticket
   publish into" picker (chosen entirely in Maya via Manage Tickets...),
   this is a **multi-select** checkbox list (one row per active-repo
   pipeline connection) letting a studio admin hide specific connections
   from the root-tab row without removing the pipeline connection itself —
-  UkoreBrowser genuinely wants to show several root tabs at once, unlike
+  MayaFileBrowser genuinely wants to show several root tabs at once, unlike
   MayaPublisher which needs exactly one destination per ticket. Stores the
   *hidden* set (opt-out), not the shown set, in this repo's own
   `core/models.py` `Repo.plugin_data["ukore_browser"]`, key
@@ -55,7 +71,7 @@ it to keep working.
     that contract working without touching either caller.
   - `core/` — Qt-free logic:
     - `repo_context.py` — auto-detects the browse root from UkoreHub's own
-      active repo, delegating to `plugins/repo_internal/PublishApi`'s
+      active repo, delegating to `cache/plugins/PublishApi`'s
       `repo_paths` module (`get_active_repo()`, `get_pipeline_refs()`,
       `resolve_ref()`) for the *active* repo — same source of truth
       `MayaPublisher` builds its publish-root resolution on. Its own
@@ -87,21 +103,21 @@ it to keep working.
 ## External dependencies (MayaToolkit + PublishApi)
 
 This plugin does **not** vendor `tmlib` or `UkoreMaya` — both packages
-still live at `plugins/repo_internal/MayaToolkit/maya-scripts/{tmlib,UkoreMaya}/` and are
+still live at `cache/plugins/MayaToolkit/maya-scripts/{tmlib,UkoreMaya}/` and are
 imported by name (`tmlib.ui.interface_template`, `tmlib.module.PySide`,
 `UkoreMaya.core.template_ui`, `UkoreMaya.core.menu_utils`,
 `UkoreMaya.core.function`). It also doesn't vendor its own repo/pipeline
 path-resolution logic anymore as of 2026-07-19 — `core/repo_context.py`
 imports `PublishApi.repo_paths` instead (see below). Both of these only
-resolve because `plugins/repo_internal/MayaToolkit/plugin.py` and
-`plugins/repo_internal/PublishApi/plugin.py` each contribute their own
+resolve because `cache/plugins/MayaToolkit/plugin.py` and
+`cache/plugins/PublishApi/plugin.py` each contribute their own
 `maya-scripts/` folder to the same `maya_launcher_env_bridge` PYTHONPATH
 bridge this plugin uses — **if either is ever disabled for a repo (via
-Repository Setting > Enable Plugin, which `plugins/repo_internal/maya_launcher/`
-gates its bridge merge on), UkoreBrowser
+Repository Setting > Enable Plugin, which `cache/plugins/maya_launcher/`
+gates its bridge merge on), MayaFileBrowser
 breaks.** Don't "fix" this by vendoring `tmlib`/`UkoreMaya`/`PublishApi`'s
 logic in here without a deliberate decision to do so; see
-`plugins/repo_internal/maya_launcher/README.md` for the general shape of the
+`cache/plugins/maya_launcher/README.md` for the general shape of the
 bridge convention every Maya tool plugin here relies on.
 
 ## Root-path detection
@@ -148,7 +164,7 @@ that affecting what the columns are rooted at.
 `core/repo_context.get_pipeline_root_tabs()` calls
 `PublishApi.repo_paths.resolve_ref()`/`get_custom_path()` (same source of
 truth `MayaPublisher` resolves its publish root through — see
-`plugins/repo_internal/PublishApi/README.md`)
+`cache/plugins/PublishApi/README.md`)
 — but **not** that module's own `get_pipeline_refs()`, since that takes no
 repo argument and always resolves whatever is *currently* live in
 UkoreHub, which would bypass the session lock above. Instead,
@@ -172,10 +188,24 @@ which re-points `root_path`, the recent-files `BrowserConfig`, the
 `__init__` uses to set things up the first time. No-ops entirely (no tab
 row added) if there's no active repo.
 
+## Maya-scripts package name stays `UkoreBrowser`
+
+The 2026-08-10 rename only touched the plugin's own folder, manifest
+`name`, and settings-tab label — it deliberately did **not** touch
+`maya-scripts/UkoreBrowser/`, the Maya-side Python package. Renaming that
+folder would break `tmlib.core.File.launch("UkoreBrowser")`'s hardcoded
+import path (called from `UkoreMaya/core/menu_utils.py:browser()` and the
+auto-launch hook in `UkoreMaya/core/function.py` — both external callers
+this plugin doesn't own), plus `ui/main_window.py`'s hardcoded
+`super().__init__("UkoreBrowser")` toolkit name and `ui.ui`'s Qt Designer
+lookup by that same name. So inside Maya, artists still see/launch "Ukore
+Browser" via the Studio Tool menu; only the UkoreHub-side plugin identity
+and Settings label changed. Don't "fix" this mismatch by renaming the
+Maya-side package — see `interface.py`'s own comment for the same warning.
+
 ## Working on this plugin
 
-Read/edit only files under this folder for a UkoreBrowser-only task — see
+Read/edit only files under this folder for a MayaFileBrowser-only task — see
 `plugins/README.md`'s plugin-scoping note (and the `ukorehub-plugin` skill)
 for why sibling plugins shouldn't be opened unless the task explicitly
 touches them.
-# MayaFileBrowser

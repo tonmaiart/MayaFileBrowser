@@ -1,9 +1,9 @@
 {
   "id": "ukore_browser",
-  "name": "Ukore Browser",
-  "version": "1.0.0",
+  "name": "Maya File Browser",
+  "version": "1.0.1",
   "api_version": 1,
   "entry_point": "plugin.py",
-  "description": "Maya-side asset browser, launched from inside Maya. Contributes its maya-scripts folder (plus UkoreHub's own app root) to the Maya Launcher env bridge — does not launch Maya itself, and still depends on MayaToolkit's tmlib/UkoreMaya staying on PYTHONPATH.",
+  "description": "Maya-side asset browser, launched from inside Maya. Formerly named 'Ukore Browser' (renamed to avoid confusion with unrelated similarly-named things); technical id stays 'ukore_browser' for backward compatibility with already-enabled repos. Contributes its maya-scripts folder (plus UkoreHub's own app root) to the Maya Launcher env bridge — does not launch Maya itself, and still depends on MayaToolkit's tmlib/UkoreMaya staying on PYTHONPATH.",
   "requires": ["maya_toolkit", "publish_api", "project_editor"]
 }
