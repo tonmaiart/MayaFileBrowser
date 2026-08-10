@@ -27,8 +27,17 @@ plugin for it to keep working.
   `plugins/README.md`). Since this plugin lives in its own standalone git
   clone rather than inside UkoreHub's own `plugins` package tree,
   `plugin.py` adds its own folder to `sys.path` and imports its sibling
-  `settings_page.py` by bare module name (same convention as
-  `cache/plugins/maya_launcher/plugin.py`) instead of a `plugins.repo_internal...`
+  `mayafilebrowser_settings_page.py` by bare module name (same sys.path
+  convention as `cache/plugins/maya_launcher/plugin.py` — **but not the
+  same filename**: that plugin's own sibling file is also named
+  `settings_page.py`, and since both plugins insert their own folder into
+  `sys.path` and bare-import a same-named module, whichever one
+  `discover_plugins()` imports first claims that name in `sys.modules` and
+  the other's import silently resolves to the wrong file. This broke this
+  plugin outright on 2026-08-10 — see `mayafilebrowser_settings_page.py`'s
+  own top-of-file note in `plugin.py` for the fuller story. Keep this
+  filename unique across every `cache/plugins/` plugin's sibling modules)
+  instead of a `plugins.repo_internal...`
   dotted import. It also contributes PYTHONPATH (`maya-scripts/`) **and**
   MAYA_PLUG_IN_PATH (`maya-plug-ins/`, added 2026-08-10 — see "MayaToolkit
   menu integration" below) entries to
@@ -38,7 +47,7 @@ plugin for it to keep working.
   tool is launched explicitly from a Maya menu, not triggered by opening a
   file. No direct import relationship with `maya_launcher` — just the
   shared `PluginConfigStore` id convention. **Also** registers a
-  `CATEGORY_REPO` Settings tab (`settings_page.py`, see below) — a
+  `CATEGORY_REPO` Settings tab (`mayafilebrowser_settings_page.py`, see below) — a
   UkoreHub-side page, not Maya-side, unlike everything else `plugin.py`
   does.
 - `maya-plug-ins/mayaFileBrowser.py` — a compiled/script Maya plug-in
@@ -48,7 +57,7 @@ plugin for it to keep working.
   path inside Maya (there is no auto-launch hook and no other menu item
   calling `File.launch("UkoreBrowser")` anywhere in this codebase as of
   2026-08-10, unlike what an earlier version of this README implied).
-- `settings_page.py` — `MayaFileBrowserSettingsPage`: the "Repo Studio
+- `mayafilebrowser_settings_page.py` — `MayaFileBrowserSettingsPage`: the "Repo Studio
   Setting" tab (Repository Setting popup > Maya File Browser) — unlike
   MayaPublisher's per-ticket "which pipeline connection does this ticket
   publish into" picker (chosen entirely in Maya via Manage Tickets...),
@@ -226,7 +235,7 @@ Project Editor, each resolved down to its specific declared `CustomPath`
 rather than just the target repo's root (e.g. `RigPublish`'s "Character"
 `CustomPath`, not all of `RigPublish`), as `{"label", "path"}` dicts —
 minus whichever refs a studio admin has hidden via this plugin's own Repo
-Studio Setting tab (`settings_page.py`, `_get_hidden_root_tab_keys`, see
+Studio Setting tab (`mayafilebrowser_settings_page.py`, `_get_hidden_root_tab_keys`, see
 above).
 `ui/main_window.py`'s `_build_root_tabs()` turns this into a row of
 checkable buttons inserted at row 0 of the central grid layout (unused by
