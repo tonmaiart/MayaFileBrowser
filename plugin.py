@@ -74,3 +74,4 @@ def register(api) -> None:
             category=CATEGORY_REPO,
         )
     )
+
