@@ -28,8 +28,6 @@ def save_current_scene() -> None:
 
 def open_scene(path: str, force: bool = False) -> None:
     cmds.file(path, open=True, force=force)
-    menu_utils.update_references()
-
 
 def set_workspace_to(path: str) -> None:
     cmds.workspace(path, openWorkspace=True)
