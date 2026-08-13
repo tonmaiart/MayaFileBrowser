@@ -64,6 +64,19 @@ def register(api) -> None:
     labels[TOOL_ID] = TOOL_LABEL
     bridge.set("labels", labels)
 
+    # Auto-import UkoreBrowser right after Maya opens a file so its
+    # UkoreMenu.register_item() call (in maya-scripts/UkoreBrowser/__init__.py)
+    # runs before UkoreMenu itself rebuilds the menu (order 99), same
+    # convention as UkoreReferenceEditor/plugin.py — otherwise the menu item
+    # doesn't appear until something else imports UkoreBrowser (e.g. the
+    # Settings tab launching it once).
+    hooks = bridge.get("launch_hooks", {})
+    hooks[TOOL_ID] = {
+        "order": 10,
+        "post_open_mel": 'python("try:\\n    import UkoreBrowser\\nexcept ImportError:\\n    pass");',
+    }
+    bridge.set("launch_hooks", hooks)
+
     api.register_settings_tab(
         SettingsTabSpec(
             key=TOOL_ID,
