@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWidget
 
-from core.exceptions import NotFoundError
+from plugin_api import NotFoundError
 
 TOOL_ID = "ukore_browser"
 

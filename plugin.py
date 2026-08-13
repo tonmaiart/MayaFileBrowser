@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from interface.settings_tab_registry import CATEGORY_REPO, SettingsTabSpec
+from plugin_api import CATEGORY_REPO, SettingsTabSpec
 
 # This plugin lives in its own standalone git repo (cloned into
 # cache/plugins/MayaFileBrowser/), not inside UkoreHub's own `plugins`
