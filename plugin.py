@@ -58,6 +58,18 @@ def register(api) -> None:
         # vendored core/repo_context.py talks to UkoreHub's own Project/Repo model to
         # find the active repo root.
         "PYTHONPATH": {ANY_VERSION: [str(tool_root / "maya-scripts"), str(api.app_root)]},
+        # maya-plug-ins/mayaFileBrowser.py — force-loaded by maya_launcher
+        # alongside every other contributed Maya plug-in (see that plugin's
+        # _force_load_plugin_names). Its own initializePlugin inserts a menu
+        # item into MayaToolkit's existing "Ukore Studio Tool" menu rather
+        # than this plugin launching itself some other way — see that
+        # file's own module docstring and this plugin's README, "MayaToolkit
+        # menu integration", for why this needed no edit to MayaToolkit
+        # itself. tool_id "maya_toolkit" sorts before "ukore_browser"
+        # alphabetically, so maya_launcher force-loads/queues MayaToolkit's
+        # own menu-building plug-in first — see that section for the full
+        # ordering argument and the same-menu-name convention this relies on.
+        "MAYA_PLUG_IN_PATH": {ANY_VERSION: [str(tool_root / "maya-plug-ins")]},
     }
     bridge.set("contributions", contributions)
     labels = bridge.get("labels", {})
