@@ -5,7 +5,7 @@ opened outside of UkoreHub, or no repo has been selected yet).
 Path/pipeline-metadata resolution itself goes through PublishApi
 (plugins/repo_internal/PublishApi/maya-scripts/PublishApi/repo_paths.py) as of
 2026-07-19, instead of this file carrying its own duplicate copy of
-find_ukorehub_root()/store construction — so UkoreBrowser and MayaPublisher
+find_data_dir()/store construction — so UkoreBrowser and MayaPublisher
 share exactly one source of truth for what the active repo/pipeline
 metadata is. See that plugin's README.
 
@@ -116,11 +116,10 @@ def _get_repo(project_id: str, repo_id: str):
     PluginAPI instance to go through) and looks up one specific repo by id
     — shared by the two lookups below, which both just want a field off
     that repo's own plugin_data (core/models.py's Repo)."""
-    root = publish_api_repo_paths.find_ukorehub_root()
     from core.exceptions import NotFoundError
     from core.storage.metadata_store import MetadataStore
 
-    store = MetadataStore(root / "data" / "projects.json")
+    store = MetadataStore(publish_api_repo_paths.find_data_dir() / "projects.json")
     try:
         return store.get_repo(project_id, repo_id)
     except NotFoundError:
