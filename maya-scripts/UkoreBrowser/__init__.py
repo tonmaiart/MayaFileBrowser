@@ -7,7 +7,7 @@ try:
         MenuItemSpec(
             id="maya_file_browser",
             label="Maya File Browser...",
-            category="จัดการไฟล์",
+            category="General",
             command="from tmlib.core import File; File.launch('UkoreBrowser')",
             order=10,
         )
