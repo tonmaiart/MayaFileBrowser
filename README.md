@@ -62,11 +62,10 @@ plugin for it to keep working.
   `"repo_hidden_root_tabs"` (`data/projects/<project_id>.json` — moved off
   the old standalone `data/plugins/core/ukore_browser.json` blob;
   `migrate_legacy_data(api)` in this same file does the one-time cutover).
-  **Not to be confused with**
-  `<browsed repo root>/.ukorehub/ukore_browser.json` (`browser_config.py`'s
-  recent-files cache, below) — same base filename, completely different
-  location and purpose: that one lives inside whichever production repo is
-  being browsed, unrelated to this repo-hidden-tabs setting.
+  **Not to be confused with** `browser_config.py`'s recent-files cache
+  (below) — same base filename, completely different location and
+  purpose: that one is keyed per browsed repo, unrelated to this
+  repo-hidden-tabs setting.
   Read back on the Maya side by `core/repo_context.py`'s
   `get_pipeline_root_tabs()`.
 - `maya-scripts/UkoreBrowser/` — the Maya-side Python package, contributed
@@ -89,9 +88,15 @@ plugin for it to keep working.
       for `_get_hidden_root_tab_keys()`/`_get_pipeline_refs_for()`, since
       those need an *explicit* repo — see their own docstrings for why.
       Falls back to Maya's current workspace dir if there's no active repo.
-    - `browser_config.py` — recent-files persistence, stored **relative to
-      the repo root** under `<repo_root>/.ukorehub/ukore_browser.json` (one
-      file per repo, not a single global file mixing every repo/project).
+    - `browser_config.py` — recent-files persistence (paths stored relative
+      to the repo root), one file per repo. As of 2026-08-23 the file
+      itself lives under UkoreHub's own per-machine `cache/` dir (via
+      `PublishApi.repo_paths.find_cache_dir()`), keyed by a hash of the
+      repo root — **not** inside the repo being browsed. Previously stored
+      at `<repo_root>/.ukorehub/ukore_browser.json`, which left a stray
+      untracked file/folder in every browsed production repo;
+      `BrowserConfig._load()` migrates that legacy file in and deletes it
+      the first time a given repo is opened after this change.
     - `version_filter.py` — pure "keep only the latest `_vNNN`" logic.
     - `file_ops.py` — plain filesystem ops (create/rename/delete/open in
       explorer).
