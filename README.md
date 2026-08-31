@@ -179,9 +179,10 @@ behavior for free now, not just UkoreBrowser. `get_active_repo_path()` and
 `PublishApi.repo_paths.get_active_repo()` directly. If UkoreHub had no
 active repo yet when Maya started, the lock stays open (every call
 re-resolves) until one is actually found. An artist can manually resync
-mid-session without restarting Maya via "Change Project" in the Ukore
-Tools menu (registered by `PublishApi`, calls
-`PublishApi.reset_active_repo_lock()`). The explicit root-tab buttons
+mid-session without restarting Maya via "Match Repo to Ukore Hub" (the
+bottom-most item in the "General" section of the Ukore Tools menu,
+registered by `PublishApi`, calls `PublishApi.reset_active_repo_lock()`).
+The explicit root-tab buttons
 below (`_switch_root`) are unaffected — they're a deliberate user action,
 not the auto-detected default.
 
