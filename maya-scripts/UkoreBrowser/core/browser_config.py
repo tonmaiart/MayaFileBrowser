@@ -6,12 +6,16 @@ the repo being browsed, storing paths relative to the repo root so the config
 stays valid even if the workspace root's drive letter differs machine to
 machine.
 
-Persisted under UkoreHub's own per-machine cache/ dir (via
-``PublishApi.repo_paths.find_cache_dir()``), keyed by a hash of the repo
-root, instead of inside the repo itself — an earlier version wrote to
-``<repo_root>/.ukorehub/ukore_browser.json``, which left a stray
-git-untracked file/folder inside every browsed production repo. A repo that
-still has that legacy file gets it migrated in and deleted on first load.
+Persisted under UkoreHub's own per-machine ``cache/plugin_local_config/``
+dir (via ``PublishApi.repo_paths.find_cache_dir()``), keyed by a hash of the
+repo root — NOT under ``cache/plugins/MayaFileBrowser/`` (that's this
+plugin's own git clone; ExternalPluginManager updates it with git
+pull/clean, which can silently wipe or pollute anything written inside it).
+An earlier version wrote to ``<repo_root>/.ukorehub/ukore_browser.json``
+inside the browsed repo itself (leaving a stray git-untracked file there),
+then a later one moved to ``cache/plugins/MayaFileBrowser/recent/`` (inside
+this plugin's own clone, the mistake above). Either legacy location gets
+migrated in and removed on first load.
 """
 
 from __future__ import annotations
@@ -24,7 +28,8 @@ from PublishApi.repo_paths import find_cache_dir
 
 _LEGACY_CONFIG_DIRNAME = ".ukorehub"
 _LEGACY_CONFIG_FILENAME = "ukore_browser.json"
-_CACHE_SUBDIR = os.path.join("plugins", "MayaFileBrowser", "recent")
+_LEGACY_PLUGIN_FOLDER_SUBDIR = os.path.join("plugins", "MayaFileBrowser", "recent")
+_CACHE_SUBDIR = os.path.join("plugin_local_config", "ukore_browser_recent")
 
 
 class BrowserConfig:
@@ -32,19 +37,30 @@ class BrowserConfig:
         self.repo_root = os.path.normpath(repo_root)
         self.max_recent = max_recent
         key = hashlib.sha1(self.repo_root.encode("utf-8")).hexdigest()
-        self._config_path = os.path.join(str(find_cache_dir()), _CACHE_SUBDIR, "{}.json".format(key))
+        cache_dir = str(find_cache_dir())
+        self._config_path = os.path.join(cache_dir, _CACHE_SUBDIR, "{}.json".format(key))
         self._legacy_config_path = os.path.join(self.repo_root, _LEGACY_CONFIG_DIRNAME, _LEGACY_CONFIG_FILENAME)
+        self._legacy_plugin_folder_path = os.path.join(
+            cache_dir, _LEGACY_PLUGIN_FOLDER_SUBDIR, "{}.json".format(key)
+        )
         self._recent_relpaths: list[str] = self._load()
 
     def _load(self) -> list[str]:
         if os.path.isfile(self._config_path):
             return self._read(self._config_path)
 
+        if os.path.isfile(self._legacy_plugin_folder_path):
+            recent = self._read(self._legacy_plugin_folder_path)
+            self._recent_relpaths = recent
+            self._save()
+            self._remove_legacy(self._legacy_plugin_folder_path)
+            return recent
+
         if os.path.isfile(self._legacy_config_path):
             recent = self._read(self._legacy_config_path)
             self._recent_relpaths = recent
             self._save()
-            self._remove_legacy()
+            self._remove_legacy(self._legacy_config_path)
             return recent
 
         return []
@@ -57,10 +73,10 @@ class BrowserConfig:
         except Exception:
             return []
 
-    def _remove_legacy(self) -> None:
+    def _remove_legacy(self, path: str) -> None:
         try:
-            os.remove(self._legacy_config_path)
-            os.rmdir(os.path.dirname(self._legacy_config_path))
+            os.remove(path)
+            os.rmdir(os.path.dirname(path))
         except OSError:
             pass
 

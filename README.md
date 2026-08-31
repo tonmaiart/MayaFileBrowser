@@ -166,23 +166,22 @@ Miller columns at the scene's own (usually leaf, subfolder-less) folder
 left all 5 of them permanently empty.
 
 **Session-locked, not live, as of 2026-08-04**: `tmlib.core.File.launch`
-builds a brand-new `MainWindow()` on every open, and
-`PublishApi.repo_paths.get_active_repo()` reads UkoreHub's
-`local_config.json` fresh off disk — so without locking, changing the
-active repo in UkoreHub would silently retarget the *next* time
-UkoreBrowser is opened (including via the auto-launch hook in
+builds a brand-new `MainWindow()` on every open, so without locking,
+changing the active repo in UkoreHub would silently retarget the *next*
+time UkoreBrowser is opened (including via the auto-launch hook in
 `UkoreMaya/core/function.py`), which reads as the path changing out from
-under you mid-session. `repo_context._get_locked_active_repo()` resolves
-the active repo once per Maya session and reuses that result — both
-`get_active_repo_path()` and `get_pipeline_root_tabs()` below go through
-it — so whichever repo UkoreBrowser first opened against stays the browse
-root for the rest of that Maya session regardless of later repo switches
-in UkoreHub. Relies on `UkoreBrowser.core.repo_context` never itself being
-`importlib.reload`'d (`File.launch` only reloads the `UkoreBrowser.interface`
-shim), so the module-level cache survives every reopen for the life of
-the Maya process and resets on the next Maya launch. If UkoreHub had no
+under you mid-session. The lock used to live in a local
+`repo_context._get_locked_active_repo()` wrapper, but was centralized into
+`PublishApi.repo_paths.get_active_repo()` itself on 2026-08-31 (see that
+function's docstring) — every PublishApi consumer gets session-locked
+behavior for free now, not just UkoreBrowser. `get_active_repo_path()` and
+`get_pipeline_root_tabs()` below just call
+`PublishApi.repo_paths.get_active_repo()` directly. If UkoreHub had no
 active repo yet when Maya started, the lock stays open (every call
-re-resolves) until one is actually found. The explicit root-tab buttons
+re-resolves) until one is actually found. An artist can manually resync
+mid-session without restarting Maya via "Change Project" in the Ukore
+Tools menu (registered by `PublishApi`, calls
+`PublishApi.reset_active_repo_lock()`). The explicit root-tab buttons
 below (`_switch_root`) are unaffected — they're a deliberate user action,
 not the auto-detected default.
 

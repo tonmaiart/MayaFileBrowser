@@ -9,19 +9,14 @@ find_data_dir()/store construction — so UkoreBrowser and MayaPublisher
 share exactly one source of truth for what the active repo/pipeline
 metadata is. See that plugin's README.
 
-Lazy-locked per Maya session as of 2026-08-04: `get_active_repo()` reads
-UkoreHub's `local_config.json` fresh off disk every call, and
-`tmlib.core.File.launch("UkoreBrowser")` builds a brand-new `MainWindow()`
-on every open — so without the cache below, switching the active repo in
-UkoreHub would silently retarget the *next* UkoreBrowser open, which reads
-as "the path changes out from under me" to anyone who reopens the tool
-often (including the auto-launch hook in `UkoreMaya/core/function.py`).
-`_get_locked_active_repo()` below resolves the active repo once and reuses
-that result for the rest of the session. This relies on this module
-(`UkoreBrowser.core.repo_context`) never itself being `importlib.reload`'d
-— only `UkoreBrowser.interface` is, by `File.launch` — so the module-level
-cache below survives every "open UkoreBrowser" call for the life of the
-Maya process and resets on the next Maya launch."""
+Session-locking (added here 2026-08-04, and used to live in a
+UkoreBrowser-local `_get_locked_active_repo()` wrapper around
+PublishApi.repo_paths.get_active_repo()) was centralized into
+`PublishApi.repo_paths.get_active_repo()` itself on 2026-08-31 — see that
+function's docstring. This module now just calls it directly and inherits
+the lock for free, same as every other PublishApi consumer. Manual resync
+mid-session (without restarting Maya) is available via "Change Project" in
+the Ukore Tools menu, which calls PublishApi.reset_active_repo_lock()."""
 
 from __future__ import annotations
 
@@ -29,39 +24,15 @@ from pathlib import Path
 
 from PublishApi import repo_paths as publish_api_repo_paths
 
-_active_repo_locked = False
-_cached_active_repo: tuple = (None, None, None)
-
-
-def _get_locked_active_repo():
-    """(project, repo, repo_path) for UkoreBrowser's session-locked active
-    repo. Resolves via PublishApi.repo_paths.get_active_repo() the first
-    time it finds one and remembers it from then on, ignoring later active
-    -repo changes in UkoreHub for the rest of this Maya session — see the
-    module docstring above. Until a repo is actually found, every call
-    re-resolves (nothing to lock onto yet), so UkoreBrowser still picks up
-    an active repo set in UkoreHub *after* Maya was opened, as long as it
-    hasn't already locked onto one."""
-    global _active_repo_locked, _cached_active_repo
-
-    if _active_repo_locked:
-        return _cached_active_repo
-
-    result = publish_api_repo_paths.get_active_repo()
-    if result[0] is not None:
-        _cached_active_repo = result
-        _active_repo_locked = True
-    return result
-
 
 def get_active_repo_path() -> str | None:
-    """Absolute path to UkoreBrowser's session-locked active repo (see
-    module docstring), or None if there isn't one yet (no workspace
-    configured, no active repo ever selected this session, the repo
-    folder doesn't exist on disk, or PublishApi isn't importable yet —
-    e.g. this plugin's PYTHONPATH contribution hasn't taken effect)."""
+    """Absolute path to UkoreHub's session-locked active repo (see module
+    docstring), or None if there isn't one yet (no workspace configured,
+    no active repo ever selected this session, the repo folder doesn't
+    exist on disk, or PublishApi isn't importable yet — e.g. this plugin's
+    PYTHONPATH contribution hasn't taken effect)."""
     try:
-        _project, _repo, repo_path = _get_locked_active_repo()
+        _project, _repo, repo_path = publish_api_repo_paths.get_active_repo()
         if repo_path is None or not repo_path.is_dir():
             return None
         return str(repo_path)
@@ -169,7 +140,7 @@ def get_pipeline_root_tabs() -> list[dict]:
     stays locked, showing tabs for a different repo than the one actually
     being browsed."""
     try:
-        project, repo, repo_path = _get_locked_active_repo()
+        project, repo, repo_path = publish_api_repo_paths.get_active_repo()
         if project is None or repo_path is None or not repo_path.is_dir():
             return []
 
