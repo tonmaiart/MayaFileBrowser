@@ -108,6 +108,18 @@ def _get_hidden_root_tab_keys(project_id: str, repo_id: str) -> set[str]:
     return set(hidden)
 
 
+def _get_root_tab_overrides(project_id: str, repo_id: str) -> dict:
+    """Per-ref customization a studio admin has set via this plugin's own
+    Repo Studio Setting tab (mayafilebrowser_settings_page.py): a rename of
+    the tab's label and/or extra sub-path tabs appended under it. Keyed by
+    the same ref key as _get_hidden_root_tab_keys — read off this repo's own
+    plugin_data["ukore_browser"]["root_tab_overrides"]."""
+    repo = _get_repo(project_id, repo_id)
+    if repo is None:
+        return {}
+    return repo.plugin_data.get("ukore_browser", {}).get("root_tab_overrides", {})
+
+
 def _get_pipeline_refs_for(project_id: str, repo_id: str) -> list[dict]:
     """Same lookup as PublishApi.repo_paths.get_pipeline_refs(), but for an
     explicit (project_id, repo_id) instead of that function's own internal
@@ -131,8 +143,13 @@ def get_pipeline_root_tabs() -> list[dict]:
     each resolved down to its specific declared CustomPath rather than
     just the target repo's root — minus whichever ones a studio admin has
     hidden via this plugin's own Repo Studio Setting tab
-    (_get_hidden_root_tab_keys above). Returns [] if there's no active
-    repo. Each item: {"label": str, "path": str}.
+    (_get_hidden_root_tab_keys above). A shown connection's tab label can
+    be renamed, and extra tabs can be appended for sub-paths underneath
+    it, via that same Settings tab (_get_root_tab_overrides above) — an
+    extra tab is only included if its resolved folder actually exists, so
+    a stale/typo'd sub-path just quietly drops instead of showing a dead
+    tab. Returns [] if there's no active repo. Each item: {"label": str,
+    "path": str}.
 
     Uses the same session-locked active repo as get_active_repo_path()
     (see module docstring) — otherwise the root-tab row would drift back
@@ -146,9 +163,11 @@ def get_pipeline_root_tabs() -> list[dict]:
 
         tabs = [{"label": repo.name, "path": str(repo_path)}]
         hidden_keys = _get_hidden_root_tab_keys(project.id, repo.id)
+        overrides = _get_root_tab_overrides(project.id, repo.id)
 
         for ref in _get_pipeline_refs_for(project.id, repo.id):
-            if _ref_key(ref) in hidden_keys:
+            ref_key = _ref_key(ref)
+            if ref_key in hidden_keys:
                 continue
             resolved = publish_api_repo_paths.resolve_ref(ref)
             if resolved is None:
@@ -160,8 +179,20 @@ def get_pipeline_root_tabs() -> list[dict]:
             if custom_path is None:
                 continue
             ref_path = ref_repo_path / custom_path["path"]
-            if ref_path.is_dir():
-                tabs.append({"label": "{} — {}".format(ref_repo.name, custom_path["label"]), "path": str(ref_path)})
+            if not ref_path.is_dir():
+                continue
+
+            override = overrides.get(ref_key, {})
+            label = override.get("label") or "{} — {}".format(ref_repo.name, custom_path["label"])
+            tabs.append({"label": label, "path": str(ref_path)})
+
+            for extra in override.get("extra_paths", []):
+                sub_path = extra.get("sub_path", "").strip()
+                if not sub_path:
+                    continue
+                extra_path = ref_path / sub_path
+                if extra_path.is_dir():
+                    tabs.append({"label": extra.get("label") or sub_path, "path": str(extra_path)})
 
         return tabs
     except Exception:

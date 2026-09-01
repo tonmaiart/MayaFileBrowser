@@ -62,10 +62,17 @@ plugin for it to keep working.
   `"repo_hidden_root_tabs"` (`data/projects/<project_id>.json` — moved off
   the old standalone `data/plugins/core/ukore_browser.json` blob;
   `migrate_legacy_data(api)` in this same file does the one-time cutover).
-  **Not to be confused with** `browser_config.py`'s recent-files cache
-  (below) — same base filename, completely different location and
-  purpose: that one is keyed per browsed repo, unrelated to this
-  repo-hidden-tabs setting.
+  Each row also lets the admin **rename** that connection's tab label and
+  **append extra tabs for sub-paths underneath it** (e.g. a
+  `Renders/Final` folder shown as its own tab) — stored opt-in, keyed by
+  the same ref key, under `"root_tab_overrides"` in the same
+  `plugin_data["ukore_browser"]` blob:
+  `{"<ref_key>": {"label": str, "extra_paths": [{"id", "sub_path", "label"}]}}`.
+  An entry with no label override and no extra paths is dropped rather
+  than persisted as a no-op `{}`. **Not to be confused with**
+  `browser_config.py`'s recent-files cache (below) — same base filename,
+  completely different location and purpose: that one is keyed per
+  browsed repo, unrelated to this repo-hidden-tabs/overrides setting.
   Read back on the Maya side by `core/repo_context.py`'s
   `get_pipeline_root_tabs()`.
 - `maya-scripts/UkoreBrowser/` — the Maya-side Python package, contributed
@@ -212,7 +219,12 @@ rather than just the target repo's root (e.g. `RigPublish`'s "Character"
 `CustomPath`, not all of `RigPublish`), as `{"label", "path"}` dicts —
 minus whichever refs a studio admin has hidden via this plugin's own Repo
 Studio Setting tab (`mayafilebrowser_settings_page.py`, `_get_hidden_root_tab_keys`, see
-above).
+above). A shown connection's label can be renamed, and extra tabs
+appended for sub-paths underneath it, via that same Settings tab
+(`_get_root_tab_overrides`, `"root_tab_overrides"` — see the settings-page
+bullet above); an extra tab is only emitted if `ref_path / sub_path`
+actually resolves to a real directory, so a stale/typo'd sub-path just
+quietly drops instead of showing a dead tab.
 `ui/main_window.py`'s `_build_root_tabs()` turns this into a row of
 checkable buttons inserted at row 0 of the central grid layout (unused by
 `ui.ui`, whose own rows start at 1) — clicking one calls `_switch_root(path)`,
