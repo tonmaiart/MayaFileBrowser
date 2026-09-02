@@ -49,31 +49,15 @@ plugin for it to keep working.
   UkoreHub-side page, not Maya-side, unlike everything else `plugin.py`
   does.
 - `mayafilebrowser_settings_page.py` — `MayaFileBrowserSettingsPage`: the "Repo Studio
-  Setting" tab (Repository Setting popup > Maya File Browser) — unlike
-  MayaPublisher's per-ticket "which pipeline connection does this ticket
-  publish into" picker (chosen entirely in Maya via Manage Tickets...),
-  this is a **multi-select** checkbox list (one row per active-repo
-  pipeline connection) letting a studio admin hide specific connections
-  from the root-tab row without removing the pipeline connection itself —
-  MayaFileBrowser genuinely wants to show several root tabs at once, unlike
-  MayaPublisher which needs exactly one destination per ticket. Stores the
-  *hidden* set (opt-out), not the shown set, in this repo's own
-  `core/models.py` `Repo.plugin_data["ukore_browser"]`, key
-  `"repo_hidden_root_tabs"` (`data/projects/<project_id>.json` — moved off
-  the old standalone `data/plugins/core/ukore_browser.json` blob;
-  `migrate_legacy_data(api)` in this same file does the one-time cutover).
-  Each row also lets the admin **rename** that connection's tab label and
-  **append extra tabs for sub-paths underneath it** (e.g. a
-  `Renders/Final` folder shown as its own tab) — stored opt-in, keyed by
-  the same ref key, under `"root_tab_overrides"` in the same
-  `plugin_data["ukore_browser"]` blob:
-  `{"<ref_key>": {"label": str, "extra_paths": [{"id", "sub_path", "label"}]}}`.
-  An entry with no label override and no extra paths is dropped rather
-  than persisted as a no-op `{}`. **Not to be confused with**
-  `browser_config.py`'s recent-files cache (below) — same base filename,
-  completely different location and purpose: that one is keyed per
-  browsed repo, unrelated to this repo-hidden-tabs/overrides setting.
-  Read back on the Maya side by `core/repo_context.py`'s
+  Setting" tab (Repository Setting popup > Maya File Browser). As of
+  2026-09-02 this loads `MayaFileBrowserSettingsWindow.ui` at runtime via
+  `QUiLoader` (same pattern `project_editor`'s settings pages use) instead
+  of building the widget tree in code — see "Extra tab paths (settings UI
+  rewrite, 2026-09-02)" below for the full shape and what this replaced.
+  **Not to be confused with** `browser_config.py`'s recent-files cache
+  (below) — same base filename, completely different location and
+  purpose: that one is keyed per browsed repo, unrelated to this settings
+  page. Read back on the Maya side by `core/repo_context.py`'s
   `get_pipeline_root_tabs()`.
 - `maya-scripts/UkoreBrowser/` — the Maya-side Python package, contributed
   to `PYTHONPATH` so `import UkoreBrowser` works inside Maya:
@@ -120,6 +104,51 @@ plugin for it to keep working.
     level deeper, under `ui/`, than the original single-file version did).
   - `template/` — `template.ma`/`template.blend`, copied when creating a new
     scene file from the browser's "+" menu.
+
+## Extra tab paths (settings UI rewrite, 2026-09-02)
+
+`mayafilebrowser_settings_page.py` used to be a hand-built widget tree: one
+box per active-repo pipeline connection with a checkbox (hide/show that
+connection's root tab), a rename field, and an inline "+ Add sub-path tab"
+row with two free-typed `QLineEdit`s (sub-path, label). That checkbox
+hide/rename feature was **dropped** in this rewrite — the page now loads
+`MayaFileBrowserSettingsWindow.ui` (one `QTableWidget`, columns "Tab Name" /
+"Extra Path" / "Used Connect Path", plus a single "Add" button) via
+`QUiLoader`, and lists every connection's extra tabs flat across all
+connections instead of nesting them per connection box. The old
+`"repo_hidden_root_tabs"`/`root_tab_overrides[key]["label"]` data (hidden
+set + connection rename) is still read on the Maya side by
+`core/repo_context.py`'s `get_pipeline_root_tabs()` for repos that already
+had it saved, but nothing in this plugin writes either of those two keys
+anymore — bring the hide/rename UI back deliberately (its own `.ui`
+section) if that's needed again.
+
+Clicking "Add" opens `AddExtraPathDialogue.ui` (`_AddExtraPathDialog` in the
+same file): pick which connection (`comboBox_custom_path`, one entry per
+`pipeline_inputs` ref, same `_describe_ref()` text as before), type a tab
+name, then "Browse Relative Path..." opens `QFileDialog.getExistingDirectory`
+rooted at that connection's `CustomPath` folder resolved from disk — same
+"reject anything picked from outside the root" rule `project_editor`'s own
+CustomPath "Browse..." button uses. Switching the connection combo clears
+whatever relative path was already browsed, since it was resolved against
+the *previous* connection's root. `lineEdit_full_extra_path` previews the
+result as `<target repo name>/<custom path's own path>/<relative path>` —
+a logical path for confirmation, not a real filesystem path. Both "Browse"
+and "Add" re-resolve and existence-check the connection's root (and, on
+Add, the full picked folder) on disk before accepting — a deleted repo,
+deleted `CustomPath`, or a folder removed after Browse but before Add all
+surface as a `QMessageBox.critical`, not a silent no-op or stale save.
+Saved shape is unchanged from before this rewrite —
+`root_tab_overrides["<ref_key>"]["extra_paths"]`:
+`[{"id", "sub_path", "label"}]` — so extra tabs saved by the old UI still
+show up in the new table; only `"label"` is no longer optional (the new
+dialog requires a tab name, where the old free-typed field could be left
+blank and fell back to the sub-path on the Maya side).
+
+There's no way to remove or edit an existing row from this page yet — only
+`pushButton_add_extra_path` exists in the `.ui`. Add that deliberately
+(new button + `.ui` change) if it's actually needed, rather than assuming
+it belongs here.
 
 ## External dependencies (MayaToolkit + PublishApi)
 

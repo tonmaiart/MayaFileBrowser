@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import os
 import uuid
+from pathlib import Path
 
+from PySide6.QtCore import QFile
+from PySide6.QtUiTools import QUiLoader
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QFrame,
-    QHBoxLayout,
-    QLabel,
+    QAbstractItemView,
+    QComboBox,
+    QDialog,
+    QFileDialog,
     QLineEdit,
+    QMessageBox,
     QPushButton,
-    QToolButton,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -17,45 +23,206 @@ from PySide6.QtWidgets import (
 from plugin_api import NotFoundError
 
 TOOL_ID = "ukore_browser"
+_PLUGIN_DIR = Path(__file__).resolve().parent
 
 
 def _ref_key(ref: dict) -> str:
     return "{}:{}:{}".format(ref.get("project_id"), ref.get("repo_id"), ref.get("custom_path_id"))
 
 
-class MayaFileBrowserSettingsPage(QWidget):
-    """Repo Studio Setting for MayaFileBrowser (formerly UkoreBrowser) — unlike MayaPublisher's
-    per-ticket "which pipeline connection does this ticket publish into"
-    picker (chosen entirely in Maya via Manage Tickets...), MayaFileBrowser
-    genuinely shows several root tabs at once (its whole point is
-    browsing multiple pipeline-connected repos side by side), so this is
-    a **multi-select** checkbox list instead — one row per active-repo
-    pipeline connection ("Connect Pipeline Input Path...", each a
-    specific CustomPath within a target repo, see
-    plugins/core/project_editor/pipeline_store.py), letting a studio
-    admin hide ones that would just clutter the tab bar rather than
-    picking exactly one. Each row also lets the admin rename the tab's
-    label and append extra tabs for sub-paths underneath that connection
-    (e.g. a "Renders/Final" folder shown as its own tab), rather than
-    always showing the connection's own CustomPath root as-is.
+def _load_ui(filename: str, parent: QWidget) -> QWidget:
+    loader = QUiLoader()
+    ui_file = QFile(str(_PLUGIN_DIR / filename))
+    ui_file.open(QFile.ReadOnly)
+    try:
+        return loader.load(ui_file, parent)
+    finally:
+        ui_file.close()
 
-    Stores the HIDDEN set (opt-out): a brand-new pipeline ref (or a
-    brand-new tool version state entirely) should default to shown/
-    enabled rather than requiring someone to notice and re-check it. The
-    rename/extra-paths customization is stored separately as an opt-in
-    "root_tab_overrides" map, keyed by the same ref key, so a ref with no
-    customization takes no extra space and falls back to the default
-    label/no extra tabs.
-    Persists into this repo's own Repo.plugin_data[TOOL_ID]
-    ("ukore_browser", the technical id kept for backward compatibility —
-    see plugin.py) under keys "repo_hidden_root_tabs" and
-    "root_tab_overrides", via api.metadata.get_repo_plugin_data/
-    set_repo_plugin_data — moved off the old standalone
-    data/plugins/core/ukore_browser.json PluginConfigStore blob by
-    migrate_legacy_data() below. Read back on the Maya side by
-    maya-scripts/UkoreBrowser/core/repo_context.py's
-    get_pipeline_root_tabs(). Same self-resolving-active-repo `refresh()`
-    pattern as interface/settings/browser_links_settings_page.py."""
+
+def _get_custom_path(api, ref: dict) -> dict | None:
+    target_entry = api.metadata.get_repo_plugin_data(ref["project_id"], ref["repo_id"], "project_editor")
+    return next(
+        (cp for cp in target_entry.get("custom_paths", []) if cp["id"] == ref.get("custom_path_id")), None
+    )
+
+
+def _resolve_custom_path_root(api, ref: dict) -> Path | None:
+    """Resolves a pipeline_inputs ref to the target repo's declared CustomPath
+    folder on disk. PluginAPI has no ready-made helper for this — mirrors the
+    worked example in developer/app/docs/plugins/project_editor.md
+    ("resolving a pipeline connection all the way to an actual filesystem
+    path takes two lookups")."""
+    try:
+        target_repo = api.metadata.get_repo(ref["project_id"], ref["repo_id"])
+        custom_path = _get_custom_path(api, ref)
+    except NotFoundError:
+        return None
+    if custom_path is None:
+        return None
+    target_repo_path = Path(api.local_config.workspace_root) / target_repo.local_path
+    return target_repo_path / custom_path["path"]
+
+
+def _describe_ref(api, ref: dict) -> str:
+    try:
+        target_name = api.metadata.get_repo(ref["project_id"], ref["repo_id"]).name
+    except NotFoundError:
+        return "(deleted repo)"
+    custom_path = _get_custom_path(api, ref)
+    label = custom_path["label"] if custom_path else "(deleted custom path)"
+    return f"{target_name} — {label}"
+
+
+class _AddExtraPathDialog(QDialog):
+    """AddExtraPathDialogue.ui wiring — pick which connected CustomPath the
+    new tab belongs to, browse a sub-folder under it (rejecting anything
+    outside that folder, same convention project_editor's own CustomPath
+    "Browse..." button uses), and preview the full logical path from the
+    target repo's name down through the chosen relative path."""
+
+    def __init__(self, parent: QWidget, *, api, refs: list[dict]):
+        super().__init__(parent)
+        self.setWindowTitle("Add Extra Tab Path")
+        self._api = api
+        self._selected_root: Path | None = None
+        self._relative_path: str = ""
+
+        form = _load_ui("AddExtraPathDialogue.ui", self)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(form)
+
+        self._line_tab_name: QLineEdit = form.findChild(QLineEdit, "lineEdit_tabName")
+        self._combo_custom_path: QComboBox = form.findChild(QComboBox, "comboBox_custom_path")
+        self._line_relative_path: QLineEdit = form.findChild(QLineEdit, "lineEdit_relative_path")
+        self._line_full_path: QLineEdit = form.findChild(QLineEdit, "lineEdit_full_extra_path")
+        btn_browse: QPushButton = form.findChild(QPushButton, "pushButton_browse_relative_path")
+        btn_cancel: QPushButton = form.findChild(QPushButton, "pushButton_cancel")
+        btn_confirm: QPushButton = form.findChild(QPushButton, "pushButton_confirm")
+
+        for ref in refs:
+            self._combo_custom_path.addItem(_describe_ref(api, ref), ref)
+        self._combo_custom_path.currentIndexChanged.connect(self._on_custom_path_changed)
+        self._on_custom_path_changed(self._combo_custom_path.currentIndex())
+
+        btn_browse.clicked.connect(self._on_browse)
+        btn_cancel.clicked.connect(self.reject)
+        btn_confirm.clicked.connect(self._on_confirm)
+
+        self.result_ref: dict | None = None
+        self.result_tab_name: str = ""
+        self.result_relative_path: str = ""
+
+    def _current_ref(self) -> dict | None:
+        index = self._combo_custom_path.currentIndex()
+        return self._combo_custom_path.itemData(index) if index >= 0 else None
+
+    def _on_custom_path_changed(self, _index: int) -> None:
+        # Switching which connection this tab belongs to invalidates any
+        # relative path already browsed under the previous one.
+        self._selected_root = None
+        self._relative_path = ""
+        self._line_relative_path.clear()
+        self._line_full_path.clear()
+
+    def _on_browse(self) -> None:
+        ref = self._current_ref()
+        if ref is None:
+            QMessageBox.warning(self, "Add Extra Tab Path", "Pick a custom path first.")
+            return
+
+        root = _resolve_custom_path_root(self._api, ref)
+        if root is None:
+            QMessageBox.critical(
+                self, "Add Extra Tab Path", "That custom path no longer exists (deleted repo or custom path)."
+            )
+            return
+        if not root.is_dir():
+            QMessageBox.critical(
+                self, "Add Extra Tab Path", f"The custom path's folder doesn't exist on disk:\n{root}"
+            )
+            return
+
+        chosen = QFileDialog.getExistingDirectory(self, "Browse Relative Path", str(root))
+        if not chosen:
+            return
+
+        try:
+            relative = Path(chosen).resolve().relative_to(root.resolve())
+        except ValueError:
+            QMessageBox.critical(
+                self,
+                "Add Extra Tab Path",
+                "That folder isn't inside the selected custom path — pick a sub-folder of it instead.",
+            )
+            return
+
+        self._selected_root = root
+        self._relative_path = str(relative).replace(os.sep, "/")
+        self._line_relative_path.setText(self._relative_path)
+        self._update_full_path_preview(ref)
+
+    def _update_full_path_preview(self, ref: dict) -> None:
+        target_repo = self._api.metadata.get_repo(ref["project_id"], ref["repo_id"])
+        custom_path = _get_custom_path(self._api, ref)
+        parts = [target_repo.name, custom_path["path"] if custom_path else "", self._relative_path]
+        self._line_full_path.setText("/".join(part.strip("/") for part in parts if part))
+
+    def _on_confirm(self) -> None:
+        ref = self._current_ref()
+        tab_name = self._line_tab_name.text().strip()
+
+        if ref is None:
+            QMessageBox.warning(self, "Add Extra Tab Path", "Pick a custom path first.")
+            return
+        if not tab_name:
+            QMessageBox.warning(self, "Add Extra Tab Path", "Enter a tab name.")
+            return
+        if not self._relative_path or self._selected_root is None:
+            QMessageBox.warning(self, "Add Extra Tab Path", "Browse and pick a relative path first.")
+            return
+
+        # Re-validate on confirm too — the custom path or the picked folder
+        # may have gone stale (deleted repo/custom path/folder) since Browse.
+        root = _resolve_custom_path_root(self._api, ref)
+        if root is None or not root.is_dir():
+            QMessageBox.critical(
+                self, "Add Extra Tab Path", "That custom path is no longer valid — browse and pick a relative path again."
+            )
+            return
+        full_path = root / self._relative_path
+        if not full_path.is_dir():
+            QMessageBox.critical(
+                self,
+                "Add Extra Tab Path",
+                f"That folder doesn't exist under the custom path anymore:\n{full_path}",
+            )
+            return
+
+        self.result_ref = ref
+        self.result_tab_name = tab_name
+        self.result_relative_path = self._relative_path
+        self.accept()
+
+
+class MayaFileBrowserSettingsPage(QWidget):
+    """Repo Studio Setting for MayaFileBrowser (formerly UkoreBrowser) —
+    MayaFileBrowserSettingsWindow.ui loaded at runtime via QUiLoader (same
+    pattern project_editor's own settings pages use), replacing the
+    hand-built widget tree this page used before. Manages the "extra tab"
+    feature only: a studio admin adds a tab for a sub-folder underneath one
+    of this repo's connected pipeline CustomPaths (e.g. a "Renders/Final"
+    folder shown as its own root tab in Maya File Browser), picked by
+    browsing rather than typed by hand so it can be validated against the
+    real folder on disk. Persists into this repo's own
+    Repo.plugin_data[TOOL_ID] ("ukore_browser", kept for backward
+    compatibility — see plugin.py) under "root_tab_overrides", keyed by
+    connection ref, via api.metadata.get_repo_plugin_data/
+    set_repo_plugin_data — same storage shape the previous UI used, so
+    already-saved extra tabs still show up here. Read back on the Maya side
+    by maya-scripts/UkoreBrowser/core/repo_context.py's
+    get_pipeline_root_tabs()."""
 
     def __init__(self, parent=None, *, api):
         super().__init__(parent)
@@ -63,141 +230,55 @@ class MayaFileBrowserSettingsPage(QWidget):
         self._project_id: str | None = None
         self._repo_id: str | None = None
         self._refs: list[dict] = []
-        self._checkboxes: dict[str, QCheckBox] = {}
-        self._extra_layouts: dict[str, QVBoxLayout] = {}
 
-        self.hint_label = QLabel("")
-        self.hint_label.setWordWrap(True)
-        self._rows_container = QWidget()
-        self._rows_layout = QVBoxLayout(self._rows_container)
-        self._rows_layout.setContentsMargins(0, 0, 0, 0)
-
+        form = _load_ui("MayaFileBrowserSettingsWindow.ui", self)
         layout = QVBoxLayout(self)
-        layout.addWidget(self.hint_label)
-        layout.addWidget(self._rows_container)
-        layout.addStretch()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(form)
+
+        self._table: QTableWidget = form.findChild(QTableWidget, "tableWidget_extra_path")
+        self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._table.horizontalHeader().setStretchLastSection(True)
+
+        self._btn_add: QPushButton = form.findChild(QPushButton, "pushButton_add_extra_path")
+        self._btn_add.clicked.connect(self._on_add_clicked)
 
         self.refresh()
 
     def refresh(self) -> None:
-        """Re-resolves the active project/repo and rebuilds the row list —
+        """Re-resolves the active project/repo and rebuilds the table —
         called on construction and every time this tab becomes active
         (SettingsTabSpec.on_activated)."""
         project_id = self._api.local_config.active_project_id
         repo_id = self._api.local_config.active_repo_id
         self._project_id = project_id
         self._repo_id = repo_id
-        self._clear_rows()
 
         if not project_id or not repo_id:
-            self.hint_label.setText("Select a repo to see this information.")
+            self._refs = []
+            self._table.setRowCount(0)
+            self._btn_add.setEnabled(False)
             return
 
         entry = self._api.metadata.get_repo_plugin_data(project_id, repo_id, "project_editor")
         self._refs = entry.get("pipeline_inputs", [])
+        self._btn_add.setEnabled(bool(self._refs))
+        self._reload_table()
 
-        if not self._refs:
-            self.hint_label.setText(
-                "This repo has no pipeline connections declared in Project Editor yet — "
-                "Maya File Browser has nothing to show extra root tabs for."
-            )
-            return
-
-        self.hint_label.setText(
-            "Uncheck a connection to hide it from Maya File Browser's root-tab row without removing "
-            "the pipeline connection itself. Rename a tab, or add extra tabs for sub-paths underneath it, below."
-        )
-        hidden = set(self._get_hidden())
+    def _reload_table(self) -> None:
+        self._table.setRowCount(0)
         overrides = self._get_overrides()
         for ref in self._refs:
-            key = _ref_key(ref)
-            self._rows_layout.addWidget(self._build_ref_row(ref, key, key not in hidden, overrides.get(key, {})))
+            for extra in overrides.get(_ref_key(ref), {}).get("extra_paths", []):
+                self._append_row(ref, extra)
 
-    def _build_ref_row(self, ref: dict, key: str, checked: bool, override: dict) -> QWidget:
-        box = QFrame()
-        box.setFrameShape(QFrame.StyledPanel)
-        box_layout = QVBoxLayout(box)
-
-        top_row = QHBoxLayout()
-        checkbox = QCheckBox()
-        checkbox.setChecked(checked)
-        checkbox.toggled.connect(lambda _checked, r=ref: self._on_toggled(r))
-        self._checkboxes[key] = checkbox
-        top_row.addWidget(checkbox)
-
-        top_row.addWidget(QLabel("Name:"))
-        label_edit = QLineEdit(override.get("label", ""))
-        label_edit.setPlaceholderText(self._describe_ref(ref))
-        label_edit.editingFinished.connect(lambda r=ref, le=label_edit: self._on_label_edited(r, le))
-        top_row.addWidget(label_edit, 1)
-        box_layout.addLayout(top_row)
-
-        extras_container = QWidget()
-        extras_layout = QVBoxLayout(extras_container)
-        extras_layout.setContentsMargins(20, 0, 0, 0)
-        self._extra_layouts[key] = extras_layout
-        box_layout.addWidget(extras_container)
-
-        for extra in override.get("extra_paths", []):
-            extras_layout.addWidget(self._build_extra_row(ref, key, extra))
-
-        add_btn = QPushButton("+ Add sub-path tab")
-        add_btn.clicked.connect(lambda _checked, r=ref, k=key: self._on_add_extra(r, k))
-        box_layout.addWidget(add_btn)
-
-        return box
-
-    def _build_extra_row(self, ref: dict, key: str, extra: dict) -> QWidget:
-        extra_id = extra.setdefault("id", str(uuid.uuid4()))
-
-        row = QWidget()
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-
-        sub_path_edit = QLineEdit(extra.get("sub_path", ""))
-        sub_path_edit.setPlaceholderText("Sub-path under this connection, e.g. Renders/Final")
-        label_edit = QLineEdit(extra.get("label", ""))
-        label_edit.setPlaceholderText("Tab name (defaults to the sub-path)")
-        remove_btn = QToolButton()
-        remove_btn.setText("✕")
-
-        def save(r=ref, k=key, eid=extra_id, se=sub_path_edit, le=label_edit):
-            self._on_extra_edited(r, k, eid, se.text().strip(), le.text().strip())
-
-        sub_path_edit.editingFinished.connect(save)
-        label_edit.editingFinished.connect(save)
-        remove_btn.clicked.connect(lambda _checked, r=ref, k=key, eid=extra_id, w=row: self._on_remove_extra(r, k, eid, w))
-
-        row_layout.addWidget(sub_path_edit, 2)
-        row_layout.addWidget(label_edit, 1)
-        row_layout.addWidget(remove_btn)
-        return row
-
-    def _clear_rows(self) -> None:
-        self._checkboxes = {}
-        self._extra_layouts = {}
-        while self._rows_layout.count():
-            item = self._rows_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-
-    def _describe_ref(self, ref: dict) -> str:
-        try:
-            target_name = self._api.metadata.get_repo(ref["project_id"], ref["repo_id"]).name
-        except NotFoundError:
-            return "(deleted repo)"
-        target_entry = self._api.metadata.get_repo_plugin_data(ref["project_id"], ref["repo_id"], "project_editor")
-        custom_path = next(
-            (cp for cp in target_entry.get("custom_paths", []) if cp["id"] == ref.get("custom_path_id")), None
-        )
-        label = custom_path["label"] if custom_path else "(deleted custom path)"
-        return f"{target_name} — {label}"
-
-    def _get_hidden(self) -> list[str]:
-        return self._api.metadata.get_repo_plugin_data(self._project_id, self._repo_id, TOOL_ID).get(
-            "repo_hidden_root_tabs", []
-        )
+    def _append_row(self, ref: dict, extra: dict) -> None:
+        row = self._table.rowCount()
+        self._table.insertRow(row)
+        self._table.setItem(row, 0, QTableWidgetItem(extra.get("label", "")))
+        self._table.setItem(row, 1, QTableWidgetItem(extra.get("sub_path", "")))
+        self._table.setItem(row, 2, QTableWidgetItem(_describe_ref(self._api, ref)))
 
     def _get_overrides(self) -> dict:
         return self._api.metadata.get_repo_plugin_data(self._project_id, self._repo_id, TOOL_ID).get(
@@ -209,84 +290,30 @@ class MayaFileBrowserSettingsPage(QWidget):
         mutate(data)
         self._api.metadata.set_repo_plugin_data(self._project_id, self._repo_id, TOOL_ID, data)
 
-    def _mutate_override(self, key: str, mutate) -> None:
-        """Shared read-modify-write for one ref's entry in root_tab_overrides
-        — mutate(entry) edits the dict in place; an entry left empty (no
-        label, no extra_paths) is dropped entirely rather than persisted
-        as a no-op {}."""
+    def _on_add_clicked(self) -> None:
+        if self._project_id is None or self._repo_id is None or not self._refs:
+            return
 
-        def apply(data):
+        dialog = _AddExtraPathDialog(self, api=self._api, refs=self._refs)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        key = _ref_key(dialog.result_ref)
+        new_extra = {
+            "id": str(uuid.uuid4()),
+            "sub_path": dialog.result_relative_path,
+            "label": dialog.result_tab_name,
+        }
+
+        def mutate(data):
             overrides = dict(data.get("root_tab_overrides", {}))
             entry = dict(overrides.get(key, {}))
-            mutate(entry)
-            if entry.get("label") or entry.get("extra_paths"):
-                overrides[key] = entry
-            else:
-                overrides.pop(key, None)
+            entry["extra_paths"] = list(entry.get("extra_paths", [])) + [new_extra]
+            overrides[key] = entry
             data["root_tab_overrides"] = overrides
 
-        self._mutate_data(apply)
-
-    def _on_toggled(self, ref: dict) -> None:
-        if self._project_id is None or self._repo_id is None:
-            return
-        hidden = set(self._get_hidden())
-        key = _ref_key(ref)
-        if self._checkboxes[key].isChecked():
-            hidden.discard(key)
-        else:
-            hidden.add(key)
-        self._mutate_data(lambda data: data.__setitem__("repo_hidden_root_tabs", sorted(hidden)))
-
-    def _on_label_edited(self, ref: dict, label_edit: QLineEdit) -> None:
-        if self._project_id is None or self._repo_id is None:
-            return
-        text = label_edit.text().strip()
-
-        def mutate(entry):
-            if text:
-                entry["label"] = text
-            else:
-                entry.pop("label", None)
-
-        self._mutate_override(_ref_key(ref), mutate)
-
-    def _on_add_extra(self, ref: dict, key: str) -> None:
-        if self._project_id is None or self._repo_id is None:
-            return
-        new_extra = {"id": str(uuid.uuid4()), "sub_path": "", "label": ""}
-
-        def mutate(entry):
-            entry["extra_paths"] = list(entry.get("extra_paths", [])) + [new_extra]
-
-        self._mutate_override(key, mutate)
-        self._extra_layouts[key].addWidget(self._build_extra_row(ref, key, new_extra))
-
-    def _on_extra_edited(self, ref: dict, key: str, extra_id: str, sub_path: str, label: str) -> None:
-        if self._project_id is None or self._repo_id is None:
-            return
-
-        def mutate(entry):
-            extra_paths = list(entry.get("extra_paths", []))
-            for extra in extra_paths:
-                if extra.get("id") == extra_id:
-                    extra["sub_path"] = sub_path
-                    extra["label"] = label
-                    break
-            entry["extra_paths"] = extra_paths
-
-        self._mutate_override(key, mutate)
-
-    def _on_remove_extra(self, ref: dict, key: str, extra_id: str, row_widget: QWidget) -> None:
-        if self._project_id is None or self._repo_id is None:
-            return
-
-        def mutate(entry):
-            entry["extra_paths"] = [e for e in entry.get("extra_paths", []) if e.get("id") != extra_id]
-
-        self._mutate_override(key, mutate)
-        row_widget.setParent(None)
-        row_widget.deleteLater()
+        self._mutate_data(mutate)
+        self._reload_table()
 
 
 def migrate_legacy_data(api) -> None:
