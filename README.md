@@ -133,8 +133,16 @@ through `project_editor`'s `custom_paths`/`Repo.local_path`/
 a connection whose target repo wasn't cloned locally yet or whose
 `CustomPath.path` had been hand-edited unexpectedly, and it wasn't what
 this feature actually needed. Every extra tab is relative to the **active
-repo's own** absolute path now (`api.repo_context.repo_path`) — no
-connection/custom-path concept involved at all. `tableWidget_extra_path`'s
+repo's own** absolute path now, resolved the same way as the removed
+`CustomPath` chain minus the `custom_paths` lookup — `Path(api.local_config.workspace_root)
+/ api.metadata.get_repo(project_id, repo_id).local_path`
+(`MayaFileBrowserSettingsPage._active_repo_root()`) — **not**
+`api.repo_context.repo_path`, which was tried first and silently broke the
+Add button entirely (`plugin-api.md` doesn't document `RepoContextDTO`'s
+exact field names, and a `QMessageBox`-free `AttributeError` raised inside
+a Qt slot just gets swallowed — no dialog, no error, no console-visible
+crash from the user's seat). No connection/custom-path concept involved at
+all anymore either way. `tableWidget_extra_path`'s
 third column ("Used Connect Path") is hidden in code
 (`setColumnHidden(2, True)`) rather than removed from the `.ui`, since it
 no longer has anything meaningful to show — remove the column from the

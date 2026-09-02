@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from plugin_api import NotFoundError
+
 TOOL_ID = "ukore_browser"
 _PLUGIN_DIR = Path(__file__).resolve().parent
 
@@ -36,10 +38,12 @@ def _load_ui(filename: str, parent: QWidget) -> QWidget:
 
 class _AddExtraPathDialog(QDialog):
     """AddExtraPathDialogue.ui wiring — "Browse Relative Path..." opens a
-    folder picker rooted at the active repo's own absolute path
-    (`api.repo_context.repo_path`), rejecting anything picked from outside
-    it (same convention project_editor's own CustomPath "Browse..." button
-    uses), and previews the full path as `<repo name>/<relative path>`.
+    folder picker rooted at the active repo's own absolute path (resolved
+    by the caller via `api.local_config.workspace_root` / `Repo.local_path`
+    — see `MayaFileBrowserSettingsPage._active_repo_root()`), rejecting
+    anything picked from outside it (same convention project_editor's own
+    CustomPath "Browse..." button uses), and previews the full path as
+    `<repo name>/<relative path>`.
     Doubles as the Edit dialog when `initial_tab_name`/
     `initial_relative_path` are given (`confirm_text` swapped to "Change")
     — same dialog class, same validation, the settings page tells the two
@@ -225,15 +229,23 @@ class MayaFileBrowserSettingsPage(QWidget):
         self._btn_add.setEnabled(True)
         self._reload_table()
 
-    def _active_repo_root(self) -> Path | None:
-        context = self._api.repo_context
-        if context is None or context.repo_path is None:
+    def _active_repo(self):
+        if self._project_id is None or self._repo_id is None:
             return None
-        return Path(context.repo_path)
+        try:
+            return self._api.metadata.get_repo(self._project_id, self._repo_id)
+        except NotFoundError:
+            return None
+
+    def _active_repo_root(self) -> Path | None:
+        repo = self._active_repo()
+        if repo is None:
+            return None
+        return Path(self._api.local_config.workspace_root) / repo.local_path
 
     def _active_repo_name(self) -> str:
-        context = self._api.repo_context
-        return context.name if context is not None else ""
+        repo = self._active_repo()
+        return repo.name if repo is not None else ""
 
     def _reload_table(self) -> None:
         self._table.setRowCount(0)
