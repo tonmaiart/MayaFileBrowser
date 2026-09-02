@@ -114,41 +114,62 @@ row with two free-typed `QLineEdit`s (sub-path, label). That checkbox
 hide/rename feature was **dropped** in this rewrite — the page now loads
 `MayaFileBrowserSettingsWindow.ui` (one `QTableWidget`, columns "Tab Name" /
 "Extra Path" / "Used Connect Path", plus a single "Add" button) via
-`QUiLoader`, and lists every connection's extra tabs flat across all
-connections instead of nesting them per connection box. The old
-`"repo_hidden_root_tabs"`/`root_tab_overrides[key]["label"]` data (hidden
-set + connection rename) is still read on the Maya side by
-`core/repo_context.py`'s `get_pipeline_root_tabs()` for repos that already
-had it saved, but nothing in this plugin writes either of those two keys
-anymore — bring the hide/rename UI back deliberately (its own `.ui`
-section) if that's needed again.
+`QUiLoader`. The old `"repo_hidden_root_tabs"`/
+`root_tab_overrides[key]["label"]` data (hidden set + connection rename) is
+still read on the Maya side by `core/repo_context.py`'s
+`get_pipeline_root_tabs()` for repos that already had it saved, but nothing
+in this plugin writes either of those two keys anymore — bring the
+hide/rename UI back deliberately (its own `.ui` section) if that's needed
+again.
+
+The Add dialog (`AddExtraPathDialogue.ui`) originally had a
+`comboBox_custom_path` picker — the extra tab was relative to some *other*
+repo's declared `CustomPath` (via a `pipeline_inputs` connection), resolved
+through `project_editor`'s `custom_paths`/`Repo.local_path`/
+`workspace_root` chain the same way `core/repo_context.py`'s
+`get_pipeline_root_tabs()` resolves connection tabs (see
+`developer/app/docs/plugins/project_editor.md`'s worked example). **Removed
+2026-09-02 at the user's request** — that resolution broke confusingly for
+a connection whose target repo wasn't cloned locally yet or whose
+`CustomPath.path` had been hand-edited unexpectedly, and it wasn't what
+this feature actually needed. Every extra tab is relative to the **active
+repo's own** absolute path now (`api.repo_context.repo_path`) — no
+connection/custom-path concept involved at all. `tableWidget_extra_path`'s
+third column ("Used Connect Path") is hidden in code
+(`setColumnHidden(2, True)`) rather than removed from the `.ui`, since it
+no longer has anything meaningful to show — remove the column from the
+`.ui` directly if it's not wanted there either.
 
 Clicking "Add" opens `AddExtraPathDialogue.ui` (`_AddExtraPathDialog` in the
-same file): pick which connection (`comboBox_custom_path`, one entry per
-`pipeline_inputs` ref, same `_describe_ref()` text as before), type a tab
-name, then "Browse Relative Path..." opens `QFileDialog.getExistingDirectory`
-rooted at that connection's `CustomPath` folder resolved from disk — same
-"reject anything picked from outside the root" rule `project_editor`'s own
-CustomPath "Browse..." button uses. Switching the connection combo clears
-whatever relative path was already browsed, since it was resolved against
-the *previous* connection's root. `lineEdit_full_extra_path` previews the
-result as `<target repo name>/<custom path's own path>/<relative path>` —
-a logical path for confirmation, not a real filesystem path. Both "Browse"
-and "Add" re-resolve and existence-check the connection's root (and, on
-Add, the full picked folder) on disk before accepting — a deleted repo,
-deleted `CustomPath`, or a folder removed after Browse but before Add all
-surface as a `QMessageBox.critical`, not a silent no-op or stale save.
-Saved shape is unchanged from before this rewrite —
-`root_tab_overrides["<ref_key>"]["extra_paths"]`:
-`[{"id", "sub_path", "label"}]` — so extra tabs saved by the old UI still
-show up in the new table; only `"label"` is no longer optional (the new
-dialog requires a tab name, where the old free-typed field could be left
-blank and fell back to the sub-path on the Maya side).
+same file): type a tab name, then "Browse Relative Path..." opens
+`QFileDialog.getExistingDirectory` rooted at the active repo's own folder —
+same "reject anything picked from outside the root" rule `project_editor`'s
+own CustomPath "Browse..." button uses. `lineEdit_full_extra_path` previews
+the result as `<active repo name>/<relative path>`. Both "Browse" and "Add"
+re-check the repo root (and, on Add, the full picked folder) exist on disk
+before accepting — a repo folder moved/deleted mid-session, or a picked
+sub-folder removed after Browse but before Add, surface as a
+`QMessageBox.critical`, not a silent no-op or stale save.
 
-There's no way to remove or edit an existing row from this page yet — only
-`pushButton_add_extra_path` exists in the `.ui`. Add that deliberately
-(new button + `.ui` change) if it's actually needed, rather than assuming
-it belongs here.
+Saved shape changed from before this rewrite: `Repo.plugin_data["ukore_browser"]`
+now has a flat `"extra_root_tabs"`: `[{"id", "sub_path", "label"}]` list —
+replacing the old per-connection-keyed `root_tab_overrides[key]["extra_paths"]`
+shape, which is left in place unread/unwritten by this page for any repo
+that already had one saved (its own extra tabs are still shown on the Maya
+side, under their original pipeline-connection tab, via
+`get_pipeline_root_tabs()`'s legacy handling — see that function's
+docstring). `"label"` is required in the new dialog (the old free-typed
+field could be left blank and fell back to the sub-path on the Maya side).
+
+Right-clicking a row (`_on_table_context_menu`, custom context menu policy
+— nothing in the `.ui` itself) opens Edit/Remove, since neither has its own
+`.ui` widget either. Edit reopens `_AddExtraPathDialog` pre-filled with
+that row's tab name/relative path (`pushButton_confirm`'s text swapped to
+"Change" via the dialog's `confirm_text` param — same dialog class, same
+validation, not a separate Edit dialog) via `_write_extra()` — the one save
+path both Add and Edit go through, keyed by the extra's own stable `"id"`
+so editing never duplicates the row. Remove asks for confirmation
+(`QMessageBox.question`) before deleting the entry outright.
 
 ## External dependencies (MayaToolkit + PublishApi)
 

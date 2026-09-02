@@ -109,15 +109,32 @@ def _get_hidden_root_tab_keys(project_id: str, repo_id: str) -> set[str]:
 
 
 def _get_root_tab_overrides(project_id: str, repo_id: str) -> dict:
-    """Per-ref customization a studio admin has set via this plugin's own
-    Repo Studio Setting tab (mayafilebrowser_settings_page.py): a rename of
-    the tab's label and/or extra sub-path tabs appended under it. Keyed by
-    the same ref key as _get_hidden_root_tab_keys — read off this repo's own
-    plugin_data["ukore_browser"]["root_tab_overrides"]."""
+    """Per-ref customization a studio admin used to set via this plugin's
+    own Repo Studio Setting tab: a rename of a pipeline connection's tab
+    label and/or extra sub-path tabs appended under it. Keyed by the same
+    ref key as _get_hidden_root_tab_keys — read off this repo's own
+    plugin_data["ukore_browser"]["root_tab_overrides"]. Left in place, but
+    no longer written by mayafilebrowser_settings_page.py as of
+    2026-09-02 (see _get_extra_root_tabs below, its replacement) — kept
+    only so a repo that already had one saved keeps showing it."""
     repo = _get_repo(project_id, repo_id)
     if repo is None:
         return {}
     return repo.plugin_data.get("ukore_browser", {}).get("root_tab_overrides", {})
+
+
+def _get_extra_root_tabs(project_id: str, repo_id: str) -> list[dict]:
+    """Extra tabs for sub-folders under the active repo's own root, added
+    via this plugin's Repo Studio Setting tab (mayafilebrowser_settings_page.py) —
+    a flat `[{"id", "sub_path", "label"}]` list, unlike the legacy
+    per-pipeline-connection `root_tab_overrides` above, since these are
+    always relative to the repo itself rather than to a connected repo's
+    CustomPath. Read off this repo's own
+    plugin_data["ukore_browser"]["extra_root_tabs"]."""
+    repo = _get_repo(project_id, repo_id)
+    if repo is None:
+        return []
+    return repo.plugin_data.get("ukore_browser", {}).get("extra_root_tabs", [])
 
 
 def _get_pipeline_refs_for(project_id: str, repo_id: str) -> list[dict]:
@@ -137,15 +154,21 @@ def _get_pipeline_refs_for(project_id: str, repo_id: str) -> list[dict]:
 
 def get_pipeline_root_tabs() -> list[dict]:
     """Root-path tab options for the browser's top tab bar: the active
-    repo itself, plus every repo it has connected to via "Connect
-    Pipeline Input Path..." in Project Editor (via
+    repo itself; any extra tabs added for sub-folders under that repo's
+    own root via this plugin's Repo Studio Setting tab
+    (_get_extra_root_tabs above — a tab is only included if its resolved
+    folder actually exists, so a stale/moved sub-path just quietly drops
+    instead of showing a dead tab); then every repo it has connected to
+    via "Connect Pipeline Input Path..." in Project Editor (via
     PublishApi.repo_paths.get_pipeline_refs/resolve_ref/get_custom_path),
     each resolved down to its specific declared CustomPath rather than
     just the target repo's root — minus whichever ones a studio admin has
     hidden via this plugin's own Repo Studio Setting tab
     (_get_hidden_root_tab_keys above). A shown connection's tab label can
     be renamed, and extra tabs can be appended for sub-paths underneath
-    it, via that same Settings tab (_get_root_tab_overrides above) — an
+    it, via that same Settings tab's now-legacy per-connection overrides
+    (_get_root_tab_overrides above, no longer written by the Settings tab
+    — see its own docstring) — an
     extra tab is only included if its resolved folder actually exists, so
     a stale/typo'd sub-path just quietly drops instead of showing a dead
     tab. Returns [] if there's no active repo. Each item: {"label": str,
@@ -162,6 +185,14 @@ def get_pipeline_root_tabs() -> list[dict]:
             return []
 
         tabs = [{"label": repo.name, "path": str(repo_path)}]
+        for extra in _get_extra_root_tabs(project.id, repo.id):
+            sub_path = extra.get("sub_path", "").strip()
+            if not sub_path:
+                continue
+            extra_path = repo_path / sub_path
+            if extra_path.is_dir():
+                tabs.append({"label": extra.get("label") or sub_path, "path": str(extra_path)})
+
         hidden_keys = _get_hidden_root_tab_keys(project.id, repo.id)
         overrides = _get_root_tab_overrides(project.id, repo.id)
 
