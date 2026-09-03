@@ -40,10 +40,12 @@ class _AddExtraPathDialog(QDialog):
     """AddExtraPathDialogue.ui wiring — "Browse Relative Path..." opens a
     folder picker rooted at the active repo's own absolute path (resolved
     by the caller via `api.local_config.workspace_root` / `Repo.local_path`
-    — see `MayaFileBrowserSettingsPage._active_repo_root()`), rejecting
-    anything picked from outside it (same convention project_editor's own
-    CustomPath "Browse..." button uses), and previews the full path as
-    `<repo name>/<relative path>`.
+    — see `MayaFileBrowserSettingsPage._active_repo_root()`). Any folder can
+    be picked, even outside the repo root — the relative path is computed
+    from the repo root via `os.path.relpath`, so a folder outside it just
+    yields a `../`-prefixed relative path instead of being rejected. Picks
+    across drives (Windows only) still fail, since no relative path exists
+    between them. Previews the full path as `<repo name>/<relative path>`.
     Doubles as the Edit dialog when `initial_tab_name`/
     `initial_relative_path` are given (`confirm_text` swapped to "Change")
     — same dialog class, same validation, the settings page tells the two
@@ -108,12 +110,12 @@ class _AddExtraPathDialog(QDialog):
             return
 
         try:
-            relative = Path(chosen).resolve().relative_to(self._repo_root.resolve())
+            relative = os.path.relpath(Path(chosen).resolve(), self._repo_root.resolve())
         except ValueError:
             QMessageBox.critical(
                 self,
                 "Add Extra Tab Path",
-                "That folder isn't inside the current repo — pick a sub-folder of it instead.",
+                "That folder is on a different drive than the current repo — no relative path exists between them.",
             )
             return
 
